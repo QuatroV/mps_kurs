@@ -6,8 +6,10 @@
 #include <string.h>
 #include <avr/pgmspace.h>
 
-#define D_NUM 128
+// EEPROM macros
+#define PAGE_SIZE 32 // External EEPROM page size
 
+// SPI macros
 #define SPI_PORT PORTB
 #define SPI_DDR DDRB
 #define SS PB4
@@ -18,13 +20,8 @@
 #define SPI_DISABLE PORTB |= (1 << SS)
 #define SPI_WREN 0b00000110	 // Set the write enable latch (enable write operations)
 #define SPI_WRITE 0b00000010 // Write data to memory array beginning at selected address
-#define SPI_READ 0b00000011	 // Read data from memory array beginning at selected address
-#define SPI_RDSR 0b00000101	 // Read Status Register
-#define SPI_DUMMY 0x00		 // Dummy byte
 
-#define PAGE_SIZE 32 // External EEPROM page size
-
-#define PORTD_RS 0x20
+// LCD macros
 #define DATA 1
 #define COMMAND 0
 #define lcd_on PORTC |= 0x80	   // PC7 to E (enable) of LCD = 1
@@ -33,18 +30,11 @@
 #define lcd_command PORTC &= ~0x40 // PC6 to RS = 0
 
 #define DELAY 1
-#define LCD_STROBEDELAY 50000
-
-uint16_t debug2 = 0;
+#define LCD_STROBEDELAY 5
 
 volatile uint8_t buf_count = 0;
 volatile uint8_t buf[32];
 uint16_t buf_address = 0;
-uint8_t values[D_NUM];
-
-uint16_t addr = 0x0000;
-
-volatile uint16_t tot_overflow;
 
 volatile uint8_t channel_number = 9;
 
@@ -85,13 +75,10 @@ void adc_init()
 	ADMUX = (ADMUX & 0xF8) | channel_number;
 }
 
-void acc
+// ************************************END************************************
 
-	// ************************************END************************************
-
-	// ************************************SPI************************************
-	void
-	spi_init(void)
+// ************************************SPI************************************
+void spi_init(void)
 {
 	SPI_DDR |= ((1 << SS) | (1 << MOSI) | (1 << SCK));
 	SPI_DDR &= ~(1 << MISO);
@@ -100,12 +87,12 @@ void acc
 	SPSR = (0 << SPI2X);
 }
 
-void EEPROM_Wait(void)
+void eeprom_wait(void)
 {
 	_delay_ms(100);
 }
 
-void SPITransmitByte(uint8_t _data)
+void spi_transmit_byte(uint8_t _data)
 {
 	SPI_ENABLE;
 	SPDR = _data;
@@ -114,54 +101,9 @@ void SPITransmitByte(uint8_t _data)
 	SPI_DISABLE;
 }
 
-void SPIWriteByte(uint16_t address, uint8_t _data)
+void spi_write_page(uint16_t address, uint8_t *data, uint16_t n)
 {
-	SPITransmitByte(SPI_WREN);
-	SPI_ENABLE;
-	SPDR = SPI_WRITE;
-	while (!(SPSR & (1 << SPIF)))
-		;
-
-	SPDR = address >> 8;
-	while (!(SPSR & (1 << SPIF)))
-		;
-	SPDR = address;
-	while (!(SPSR & (1 << SPIF)))
-		;
-
-	SPDR = _data;
-	while (!(SPSR & (1 << SPIF)))
-		;
-	SPI_DISABLE;
-}
-
-uint8_t SPIReadByte(uint16_t address)
-{
-	EEPROM_Wait();
-	uint8_t result = 0;
-	SPI_ENABLE;
-	SPDR = SPI_READ;
-	while (!(SPSR & (1 << SPIF)))
-		;
-
-	SPDR = address >> 8;
-	while (!(SPSR & (1 << SPIF)))
-		;
-	SPDR = address;
-	while (!(SPSR & (1 << SPIF)))
-		;
-
-	SPDR = 0;
-	while (!(SPSR & (1 << SPIF)))
-		;
-	result = SPDR;
-	SPI_DISABLE;
-	return result;
-}
-
-void SPIWritePage(uint16_t address, uint8_t *data, uint16_t n)
-{
-	SPITransmitByte(SPI_WREN);
+	spi_transmit_byte(SPI_WREN);
 	SPI_ENABLE;
 	SPDR = SPI_WRITE;
 	while (!(SPSR & (1 << SPIF)))
@@ -182,47 +124,17 @@ void SPIWritePage(uint16_t address, uint8_t *data, uint16_t n)
 	SPI_DISABLE;
 }
 
-void SPIBufferAppend(uint8_t data)
-{
-	buf[buf_count++] = data;
-	if (buf_count == PAGE_SIZE)
-	{
-		EEPROM_Wait();
-		SPIWritePage(buf_address, buf, PAGE_SIZE);
-		buf_address = buf_address + PAGE_SIZE;
-		buf_count = 0;
-	}
-}
-
-void SPIBufferTransmit(void)
-{
-	EEPROM_Wait();
-	SPIWritePage(buf_address, buf, buf_count);
-	buf_address = buf_address + buf_count;
-	buf_count = 0;
-}
-
-void SPISaveValues(void)
-{
-	register uint8_t i = 0;
-	while (i < PAGE_SIZE)
-	{
-		SPIBufferAppend(values[i]);
-	}
-	SPIBufferTransmit();
-}
-
-void SPIClear(void)
+void spi_clear(void)
 {
 	uint8_t i = 0;
 	const uint8_t zeros[32] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 	while (i < PAGE_SIZE * 2)
 	{
-		EEPROM_Wait();
-		SPIWritePage(i * PAGE_SIZE, zeros, PAGE_SIZE);
+		eeprom_wait();
+		spi_write_page(i * PAGE_SIZE, zeros, PAGE_SIZE);
 		i++;
 	}
-	EEPROM_Wait();
+	eeprom_wait();
 }
 // ************************************END************************************
 
@@ -231,59 +143,52 @@ void SPIClear(void)
 void uart_init(void)
 {
 	UBRRH = 0;
-	UBRRL = 103;
+	UBRRL = 104;
 	UCSRA = 0x00;
 	UCSRB = (1 << RXCIE) | (1 << RXEN) | (1 << TXEN);
 	UCSRC = (1 << URSEL) | (1 << UCSZ1) | (1 << UCSZ0);
 }
 
-void USARTTransmitChar(char _data)
+void usart_transmit_char(char _data)
 {
 	while (!(UCSRA & (1 << UDRE)))
 		;
 	UDR = _data;
 }
 
-void USARTTransmitString(PGM_P _data)
+void usart_transmit_string(PGM_P _data)
 {
 	uint8_t i = 0;
 	char buf[strlen_P(_data)];
 	strcpy_P(buf, _data);
 	while (buf[i])
 	{
-		USARTTransmitChar(buf[i++]);
+		usart_transmit_char(buf[i++]);
 	}
 }
 
-void USARTTransmitStringLN(PGM_P _data)
+void usart_transmit_stringLN(PGM_P _data)
 {
-	USARTTransmitString(_data);
-	USARTTransmitChar((char)13);
-	USARTTransmitChar((char)10);
+	usart_transmit_string(_data);
+	usart_transmit_char((char)13);
+	usart_transmit_char((char)10);
 }
 
-void USARTTransmitBuffer()
+void usart_transmit_buffer()
 {
 	uint8_t i = 0;
 	while (i < PAGE_SIZE)
 	{
-		USARTTransmitChar(buf[i++]);
+		usart_transmit_char(buf[i++]);
 	}
-}
-
-unsigned char USARTReceiveChar(void)
-{
-	while (!(UCSRA & (1 << RXC)))
-		;
-	return UDR;
 }
 
 // ************************************END************************************
 
 // ******************************BUTTONS MATRIX*******************************
-uint8_t key_state(void)
-{
 
+uint8_t get_matrix_state(void)
+{
 	// Matrix
 	const uint8_t state_ddr[4] = {0xC1, 0xC2, 0xC4, 0xC8};
 	const uint8_t keypad[4][2] = {
@@ -315,13 +220,10 @@ uint8_t key_state(void)
 
 // **********************************DISPLAY**********************************
 
-uint8_t debug3 = 0;
-
-void LCDSend(uint8_t byte, char state)
+void lcd_send(uint8_t byte, char state)
 {
 	DDRD = 0b11111100; // External interrupt
 	DDRB |= 0b00001111;
-	tot_overflow++;
 	if (state == 0)
 		lcd_command;
 	else
@@ -331,86 +233,65 @@ void LCDSend(uint8_t byte, char state)
 	PORTD &= 0x0F;			// clear last 4 bits
 	PORTD |= (byte & 0xF0); // set last 4 bits
 	lcd_on;
-	_delay_us(LCD_STROBEDELAY);
+	_delay_ms(7 * DELAY);
 	lcd_off;
-	_delay_us(LCD_STROBEDELAY);
+	_delay_ms(7 * DELAY);
 }
 
-void LCDClear(void)
+void lcd_clear(void)
 {
 	_delay_ms(DELAY);
-	LCDSend(0x01, COMMAND);
+	lcd_send(0x01, COMMAND);
 }
 
-void LCDInit(void)
+void lcd_init(void)
 {
-	LCDSend(0x38, COMMAND); // Function Set: 8-bit, 2 Line
+	lcd_send(0x38, COMMAND); // Function Set: 8-bit, 2 Line
 	_delay_ms(DELAY);
-	LCDSend(0x01, COMMAND); // Clear Display (also clear DDRAM content)
+	lcd_send(0x01, COMMAND); // Clear Display (also clear DDRAM content)
 	_delay_ms(DELAY);
-	LCDSend(0x06, COMMAND); // Entry Mode (No shift and auto incremement)
+	lcd_send(0x06, COMMAND); // Entry Mode (No shift and auto incremement)
 	_delay_ms(DELAY);
-	LCDSend(0x0C, COMMAND); // Display on Cursor off
+	lcd_send(0x0C, COMMAND); // Display on Cursor off
 }
 
-void LCDCursor(char row, char column)
+void lcd_cursor(char row, char column)
 {
 	_delay_ms(DELAY);
-	LCDSend(0b10000000 | ((0x40 * row) + column), COMMAND);
+	lcd_send(0b10000000 | ((0x40 * row) + column), COMMAND);
 }
 
-void LCDDisplayString(char row, char column, PGM_P string)
+void lcd_display_string(char row, char column, char string[])
 {
-	LCDCursor(row, column);
-	char buf[strlen_P(string)];
-	strcpy_P(buf, string);
-	uint8_t i = 0;
-	while (buf[i])
-		LCDSend(buf[i++], DATA);
-}
-
-void LCDDisplayStringT(char row, char column, char string[])
-{
-	LCDCursor(row, column);
+	lcd_cursor(row, column);
 	while (*string)
-		LCDSend(*string++, DATA);
+		lcd_send(*string++, DATA);
 }
 
 // ************************************END************************************
 
 // Interrupts
 
-// START button interrupt
+/// @brief START button interrupt
 ISR(INT0_vect)
 {
-	channel_number = key_state();
+	channel_number = get_matrix_state();
 }
 
-// CLEAR button interrupt
+/// @brief CLEAR button interrupt
 ISR(INT1_vect)
 {
-	SPIClear();
+	spi_clear();
 }
 
-// ADC convert interrupt
+/// @brief ADC convert interrupt
 ISR(ADC_vect)
 {
 	if (buf_count < PAGE_SIZE)
 	{
-		debug2 = ADC;
 		buf[buf_count++] = (uint8_t)(ADC >> 2);
 	}
-	else
-	{
-		cli();
-	}
 }
-
-uint8_t current_index = 0;
-uint16_t current_voltage = 0;
-
-char channel_number_str[2] = "";
-char current_voltage_str[17] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 /// @brief Init ports, interrupts globally, USART, SPI, LCD
 void init()
@@ -419,7 +300,7 @@ void init()
 	ports_init();
 
 	interrupt_init();
-	LCDInit();
+	lcd_init();
 
 	uart_init();
 	spi_init();
@@ -430,32 +311,35 @@ void init()
 /// @brief Display legend on LCD
 void display_legend_on_lcd()
 {
-	LCDClear();
-	LCDDisplayString(2, 0, PSTR("Channel: "));
-	LCDDisplayString(1, 0, PSTR("Value: "));
+	lcd_clear();
+	lcd_display_string(2, 0, "Channel: ");
+	lcd_display_string(1, 0, "Value: ");
 }
 
 /// @brief Send data to extrenal EEPROM, LCD, Terminal
 void send_buf()
 {
+	char channel_number_str[2] = "";
+	char current_voltage_str[17] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
 	// Send data buffer with SPI to external EEPROM
-	EEPROM_Wait();
-	SPIWritePage(buf_address, buf, PAGE_SIZE);
+	eeprom_wait();
+	spi_write_page(buf_address, buf, PAGE_SIZE);
 	buf_address = buf_address + PAGE_SIZE;
 	buf_count = 0;
 
 	// Send data buffer with USART to terminal
-	USARTTransmitBuffer();
+	usart_transmit_buffer();
 
 	// Convert channel number and send to LCD
 	channel_number_str[0] = (channel_number + 1) + '0';
 	channel_number_str[1] = 0;
-	LCDDisplayStringT(2, 9, channel_number_str);
+	lcd_display_string(2, 9, channel_number_str);
 
 	// Convert last value from buffer and send to LCD
 	itoa(buf[31], current_voltage_str, 10);
-	LCDDisplayStringT(1, 9, "   ");
-	LCDDisplayStringT(1, 9, current_voltage_str);
+	lcd_display_string(1, 9, "   ");
+	lcd_display_string(1, 9, current_voltage_str);
 }
 
 int main()
@@ -480,9 +364,9 @@ int main()
 			send_buf();
 
 			// Check button matrix to observe channel number change
-			if (key_state() != 255)
+			if (get_matrix_state() != 255)
 			{
-				channel_number = key_state();
+				channel_number = get_matrix_state();
 			}
 
 			adc_init();
