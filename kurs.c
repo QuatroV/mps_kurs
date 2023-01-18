@@ -66,10 +66,6 @@ void OFF(volatile uint8_t *byte, uint8_t mask)
 void adc_init()
 {
 	ADMUX = (0 << REFS0); // Vref=AVcc
-	// ADSC=1 ADC Enable
-	// ADPS[2:0]=10, prescaler=128
-	// ADIE=1, ADC interrupt Enable
-	// ADATE=1, ADC Auto Triggering Enable
 	ADCSRA = (1 << ADEN) | (3 << ADPS0) | (1 << ADSC) | (1 << ADIE) | (1 << ADATE);
 
 	ADMUX = (ADMUX & 0xF8) | channel_number;
